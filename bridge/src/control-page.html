@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>harness-mcp</title>
+<style>
+:root{
+  --paper:#f3f6f8; --panel:#ffffff; --ink:#1e2a33; --mut:#5b6b77; --line:#d5dee3;
+  --steel:#2f5d8a; --steel-ink:#ffffff; --wait:#b7790f; --wait-bg:#fdf3dc; --go:#1f7a52; --go-bg:#e2f3ea;
+  --stop:#b23a26; --stop-bg:#fbe6e1; --focus:#2f5d8a;
+  --ui:"Segoe UI Variable Text","Segoe UI Variable","Segoe UI",system-ui,sans-serif;
+  --mono:"Cascadia Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#12181c; --panel:#1a2228; --ink:#e3eaee; --mut:#93a3ae; --line:#2c3840;
+  --steel:#6f9fd0; --steel-ink:#0d1418; --wait:#e8b04a; --wait-bg:#33280f; --go:#5cc48f; --go-bg:#15291f;
+  --stop:#f07a64; --stop-bg:#341b16; --focus:#8fb8e3; color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--paper);color:var(--ink);font:15px/1.5 var(--ui);display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+button,select,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+code,.mono{font-family:var(--mono);font-size:13px}
+
+/* Rail */
+nav{background:var(--panel);border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
+.brand{font-size:17px;font-weight:650;padding:0 10px 14px;letter-spacing:-.01em}
+.brand small{display:block;font-weight:400;font-size:12.5px;color:var(--mut)}
+nav a{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;border-radius:7px;color:var(--ink);text-decoration:none}
+nav a:hover{background:var(--paper)}
+nav a[aria-current=page]{background:var(--steel);color:var(--steel-ink);font-weight:600}
+.count{min-width:22px;text-align:center;border-radius:11px;padding:0 7px;font-size:12.5px;font-weight:650;background:var(--paper);color:var(--mut)}
+.count.hot{background:var(--wait);color:#fff}
+nav a[aria-current=page] .count{background:rgba(255,255,255,.22);color:inherit}
+.live{margin-top:auto;padding:10px;font-size:12.5px;color:var(--mut);display:flex;gap:8px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--go);flex:none}
+.live.down{color:var(--stop)} .live.down .dot{background:var(--stop)}
+
+/* Main */
+main{padding:22px 28px 60px;max-width:980px;width:100%}
+header.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px}
+h1{font-size:22px;margin:0;font-weight:650;letter-spacing:-.015em}
+h2{font-size:15px;margin:22px 0 8px;font-weight:650}
+.lede{color:var(--mut);margin:2px 0 0;max-width:62ch}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;background:none;padding:6px 14px;cursor:pointer;color:var(--mut)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--paper);font-weight:600}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 14px;border-radius:7px;cursor:pointer;font-weight:550}
+.btn:hover{border-color:var(--mut)}
+.btn.primary{background:var(--steel);border-color:var(--steel);color:var(--steel-ink)}
+.btn.go{background:var(--go);border-color:var(--go);color:#fff}
+.btn.stop{color:var(--stop);border-color:var(--stop)}
+.btn.big{padding:10px 22px;font-size:15.5px}
+.btn[disabled]{opacity:.55;cursor:progress}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+.empty{color:var(--mut);padding:26px 4px}
+.mut{color:var(--mut)} .small{font-size:13px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.spread{display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap}
+select,input[type=text],input[type=number]{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+textarea{width:100%;min-height:220px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;font:13px/1.45 var(--mono)}
+pre{font:12.5px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;margin:8px 0 0;background:var(--paper);border-radius:6px;padding:10px;max-height:340px;overflow:auto}
+
+/* Request ticket: the one element that carries weight */
+.ticket{background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--wait);border-radius:10px;padding:16px 18px;margin:12px 0}
+.ticket.target{box-shadow:0 0 0 3px var(--wait)}
+.ticket .who{font-size:13.5px;color:var(--mut)}
+.ticket .what{font-size:17px;font-weight:600;margin:4px 0 10px}
+.ticket .cmd{font:14px/1.45 var(--mono);background:var(--wait-bg);border-radius:7px;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
+.clock{margin:12px 0 12px;display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;font-size:13px;color:var(--mut)}
+.track{height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.fill{height:100%;background:var(--wait);transition:width 1s linear}
+.ticket.lapsed{border-left-color:var(--line)} .ticket.lapsed .fill{background:var(--mut)}
+.fields{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:4px 0 12px;font-size:14px}
+
+.badge{display:inline-block;border-radius:5px;padding:1px 8px;font-size:12.5px;font-weight:600}
+.b-wait{background:var(--wait-bg);color:var(--wait)} .b-go{background:var(--go-bg);color:var(--go)}
+.b-stop{background:var(--stop-bg);color:var(--stop)} .b-mut{background:var(--paper);color:var(--mut)}
+
+details.run{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin:8px 0}
+details.run summary{list-style:none;cursor:pointer;padding:11px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center}
+details.run summary::-webkit-details-marker{display:none}
+details.change{border-top:1px solid var(--line);padding:6px 0}
+details.change summary{cursor:pointer;display:flex;justify-content:space-between;gap:12px}
+pre.diff{max-height:260px}
+.plus{color:var(--go)} .minus{color:var(--stop)}
+details.run .body{padding:0 14px 14px}
+.cmdline{font:13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:top}
+td.t{white-space:nowrap;color:var(--mut);font-family:var(--mono);font-size:12.5px}
+
+#toasts{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:10;max-width:420px}
+.toast{background:var(--ink);color:var(--paper);padding:11px 14px;border-radius:8px;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.18);animation:pop .18s ease-out}
+.toast.err{background:var(--stop);color:#fff}
+@keyframes pop{from{transform:translateY(6px);opacity:0}}
+.modestrip{border-left:4px solid var(--wait);background:var(--panel);border-radius:0 8px 8px 0;padding:8px 12px;margin:0 0 14px;font-size:13.5px;color:var(--mut)}
+.modestrip b{color:var(--ink)}
+.conn{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0 0 14px}
+.conn .url{font:14px var(--mono);font-weight:600;word-break:break-all;flex:1 1 260px}
+.conn.changed{border-color:var(--wait);background:var(--wait-bg)}
+.conn.down{border-color:var(--stop);background:var(--stop-bg)}
+.bigurl{font:17px/1.4 var(--mono);font-weight:600;word-break:break-all;background:var(--paper);border-radius:8px;padding:12px 14px;margin:8px 0 10px}
+ol.steps{margin:6px 0 0;padding-left:22px}ol.steps li{margin:4px 0}
+.alertbox{border:1px solid var(--stop);background:var(--stop-bg);color:var(--stop);border-radius:8px;padding:9px 12px;margin:8px 0;font-size:14px}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}}
+
+main{min-width:0}
+.fields input[type=text]{flex:1 1 280px;min-width:0;max-width:100%}
+@media (max-width:760px){
+  body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
+  nav{position:sticky;top:0;z-index:5;height:auto;flex-direction:row;align-items:center;overflow-x:auto;padding:8px 10px;gap:4px;border-right:0;border-bottom:1px solid var(--line)}
+  .controls{width:100%}
+  .brand,.live{display:none}
+  nav a{flex:none;gap:8px}
+  main{padding:16px}
+}
+</style>
+</head>
+<body>
+<nav aria-label="Sections">
+  <div class="brand">harness-mcp<small>Your PC, shared with web agents</small></div>
+  <a href="#connect" data-view="connect">Connect</a>
+  <a href="#inbox" data-view="inbox">Inbox <span class="count" id="c-inbox">0</span></a>
+  <a href="#runs" data-view="runs">Runs <span class="count" id="c-runs">0</span></a>
+  <a href="#agents" data-view="agents">Agents <span class="count" id="c-agents">0</span></a>
+  <a href="#folders" data-view="folders">Folders</a>
+  <a href="#patch" data-view="patch">Paste a patch</a>
+  <a href="#activity" data-view="activity">Activity</a>
+  <div class="live" id="live" role="status"><span class="dot"></span><span id="live-text">Connecting…</span></div>
+</nav>
+
+<main>
+  <header class="bar">
+    <div><h1 id="title">Inbox</h1><p class="lede" id="lede"></p></div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Server mode">
+        <button data-act="mode" data-mode="on" title="Agents can use their tools">On</button>
+        <button data-act="mode" data-mode="paused" title="Agents stay connected, but every tool call is refused">Paused</button>
+        <button data-act="mode" data-mode="off" title="The server refuses all connections">Off</button>
+      </div>
+      <button class="btn" data-act="alerts" id="alerts-btn">Turn on alerts</button>
+      <button class="btn stop" data-act="rotate">Disconnect all agents</button>
+    </div>
+  </header>
+  <div id="conn"></div>
+  <div class="modestrip" role="note"><b>Limits-only mode.</b> Commands run with your full Windows rights: they can read, change and send anything your account can, with time and memory limits only. Read-only git commands and each workspace’s own test command run without asking; every other command waits for you in the Inbox.</div>
+  <div id="alerts"></div>
+  <section id="view" aria-live="polite"></section>
+</main>
+<div id="toasts" aria-live="assertive"></div>
+
+<script>
+const CSRF = '__CSRF__'
+const VIEWS = {
+  connect: ['Connect', 'The address to give your chat app, and the tunnel that makes this PC reachable.'],
+  inbox: ['Inbox', 'Requests from agents that need your decision. The agent waits while the bar runs down.'],
+  runs: ['Runs', 'Every test and command run on this PC, newest first. Open one to see its output.'],
+  agents: ['Agents', 'Chat apps that have connected. Read-only agents can look; full agents can also edit files and run commands.'],
+  folders: ['Folders', 'Where agents may read and write, and the undo points saved before each change.'],
+  patch: ['Paste a patch', 'For chats that can only suggest changes: paste their patch here to apply it to the active workspace.'],
+  activity: ['Activity', 'Everything agents did and everything you decided, newest first.'],
+}
+let S = null, skew = 0, lastOk = 0, lastError = '', view = 'inbox', lastInbox = -1, audio = null
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+const now = () => Date.now() + skew
+const ago = (iso) => { if (!iso) return 'never'; const s = Math.round((now() - Date.parse(iso)) / 1000); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : new Date(iso).toLocaleString() }
+const clock = (iso) => new Date(iso).toLocaleTimeString()
+const shortPath = (p) => String(p ?? '').replace(/^C:\\Users\\[^\\]+\\/i, '~\\')
+
+function toast(msg, err = false) {
+  const t = document.createElement('div')
+  t.className = 'toast' + (err ? ' err' : '')
+  t.textContent = msg
+  $('toasts').append(t)
+  setTimeout(() => t.remove(), err ? 9000 : 4500)
+}
+
+async function post(url, body, btn, success) {
+  if (btn) btn.disabled = true
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf': CSRF }, body: JSON.stringify(body || {}) })
+    const j = await r.json().catch(() => ({}))
+    if (r.status === 403 && String(j.error).startsWith('stale-page:')) {
+      // harness-mcp restarted since this page loaded, so its security token is old: reload quietly.
+      toast('harness-mcp restarted since this page was opened. Reloading the page — click again afterwards.')
+      setTimeout(() => location.reload(), 1200)
+      return null
+    }
+    if (!r.ok) throw new Error(j.error || `The server answered ${r.status}.`)
+    if (success) toast(typeof success === 'function' ? success(j) : success)
+    await refresh()
+    return j
+  } catch (e) {
+    toast(e.message === 'Failed to fetch' ? 'Could not reach harness-mcp. Is the server still running?' : e.message, true)
+    if (btn) btn.disabled = false
+    return null
+  }
+}
+
+/* ---------- connection ---------- */
+
+function connInfo() {
+  const c = S.connection
+  const t = c.tunnel
+  if (c.publicUrlMode === 'fixed') return { url: c.fixedUrl, state: 'fixed', note: 'Fixed address from config.json.' }
+  if (t.mode === 'quick') {
+    if (t.state === 'up' && t.url) return { url: t.url + '/mcp', state: 'up', note: `Tunnel up since ${clock(t.since)}. This address changes each time the tunnel restarts.` }
+    if (t.state === 'starting') return { url: null, state: 'starting', note: t.message || 'Starting the tunnel…' }
+    return { url: null, state: 'down', note: t.message || 'The tunnel is not running.' }
+  }
+  if (c.connectorUrl) return { url: c.connectorUrl.current, state: 'seen', note: `Taken from the last request through your tunnel (${ago(c.lastRequest?.at || c.connectorUrl.changedAt)}). If you restarted cloudflared, open its new address once to update this.` }
+  return { url: null, state: 'unknown', note: 'No request has arrived through a tunnel yet. Start cloudflared and open its address once.' }
+}
+
+function urlChangedRecently() {
+  const u = S.connection.connectorUrl
+  return u && u.previous && u.previous !== u.current ? u : null
+}
+
+function renderConn() {
+  const i = connInfo()
+  const changed = urlChangedRecently()
+  const cls = i.state === 'down' ? ' down' : changed && i.url === changed.current ? ' changed' : ''
+  const sig = JSON.stringify([i, changed && changed.changedAt])
+  if ($('conn').dataset.sig === sig) return
+  $('conn').dataset.sig = sig
+  $('conn').innerHTML = `<div class="conn${cls}">
+    <span class="small mut">Connector URL</span>
+    <span class="url">${i.url ? esc(i.url) : esc(i.state === 'starting' ? 'Starting tunnel…' : 'Not available — see Connect')}</span>
+    ${i.url ? `<button class="btn" data-act="copy" data-text="${esc(i.url)}">Copy</button>` : ''}
+    ${changed && i.url === changed.current ? `<span class="small" style="flex-basis:100%;color:var(--wait)">This address changed ${esc(ago(changed.changedAt))}. Update the connector in your chat app — see Connect.</span>` : ''}
+  </div>`
+}
+
+function renderConnect() {
+  const i = connInfo()
+  const c = S.connection
+  const changed = urlChangedRecently()
+  const tunnelButtons = c.tunnel.state === 'stopped' || c.tunnel.state === 'error'
+    ? '<button class="btn primary" data-act="tunnel" data-op="start">Start tunnel</button>'
+    : '<button class="btn" data-act="tunnel" data-op="restart">New tunnel</button><button class="btn stop" data-act="tunnel" data-op="stop">Stop tunnel</button>'
+  return `<div class="panel"><b>Address for your chat app</b>
+      ${i.url ? `<div class="bigurl">${esc(i.url)}</div><div class="row"><button class="btn primary" data-act="copy" data-text="${esc(i.url)}">Copy address</button></div>` : `<p class="mut">${esc(i.note)}</p>`}
+      ${i.url ? `<p class="small mut">${esc(i.note)}</p>` : ''}
+      <p class="small">There is no secret in this address. Your chat app signs in with your passphrase and authenticator code, and you allow it in the Inbox.</p></div>
+    ${changed ? `<div class="panel"><b>The address changed ${esc(ago(changed.changedAt))}</b><p class="small" style="margin:4px 0 0">Old: <span class="mono">${esc(changed.previous)}</span><br>New: <span class="mono">${esc(changed.current)}</span></p>
+      <p class="small mut">Chat apps set up with the old address can’t reach this PC any more. In each one, edit the connector (or remove it and add it again) with the new address.</p></div>` : ''}
+    <div class="panel"><b>Connect a chat app</b><ol class="steps">
+      <li><b>ChatGPT:</b> Plugins → + → Add custom MCP server → paste the address → Authentication: OAuth.</li>
+      <li><b>Claude:</b> Settings → Connectors → Add custom connector → paste the address.</li>
+      <li><b>Other web agents:</b> add a remote MCP server with this address and OAuth.</li>
+      <li>Sign in with your passphrase and authenticator code, then allow the connection in the Inbox.</li></ol></div>
+    <div class="panel"><div class="spread"><b>Tunnel</b>${c.tunnel.mode === 'quick' ? `<div class="row">${tunnelButtons}</div>` : ''}</div>
+      ${c.tunnel.mode === 'quick'
+        ? `<p class="small mut">harness-mcp runs a Cloudflare quick tunnel for you. State: <b>${esc(c.tunnel.state)}</b>${c.tunnel.message ? ' — ' + esc(c.tunnel.message) : ''}</p>${c.tunnel.log.length ? `<details><summary class="small">cloudflared log</summary><pre>${esc(c.tunnel.log.join('\n'))}</pre></details>` : ''}`
+        : `<p class="small mut">You run the tunnel yourself. To have harness-mcp start it and show its new address automatically, set <code>"tunnel": {"mode": "quick"}</code> in config.json and restart harness-mcp. For an address that never changes, use a named Cloudflare tunnel on your own domain.</p>`}</div>`
+}
+
+/* ---------- views ---------- */
+
+function inboxItems() {
+  return (S?.connects.length ?? 0) + (S?.actions.length ?? 0)
+}
+
+function bar(start, end) {
+  const total = end - start, left = Math.max(0, end - now())
+  const pct = total > 0 ? Math.round((left / total) * 100) : 0
+  return { left: Math.ceil(left / 1000), pct, lapsed: left <= 0 }
+}
+
+function renderInbox() {
+  const out = []
+  for (const c of S.connects) {
+    const b = bar(c.since, c.expiresAt)
+    out.push(`<article class="ticket${b.lapsed ? ' lapsed' : ''}${c.id === approveId ? ' target' : ''}" data-deadline="${c.expiresAt}" data-start="${c.since}">
+      <div class="who">${esc(c.origin)}${c.isNew ? ' · never connected before' : ''}</div>
+      <div class="what">${esc(c.clientName)} wants to connect to this PC</div>
+      <div class="clock"><div class="track"><div class="fill" style="width:${b.pct}%"></div></div><span class="left">${b.lapsed ? 'Expired' : b.left + ' s left'}</span></div>
+      <div class="fields"><label for="prof-${c.id}">Access</label>
+        <select id="prof-${c.id}"><option value="read-only"${c.profile !== 'full' ? ' selected' : ''}>Read only — can look at code</option><option value="full"${c.profile === 'full' ? ' selected' : ''}>Full — can also edit files and run commands</option></select></div>
+      <div class="row"><button class="btn go big" data-act="connect-approve" data-id="${c.id}">Allow connection</button><button class="btn stop" data-act="connect-deny" data-id="${c.id}">Refuse</button></div>
+    </article>`)
+  }
+  for (const a of S.actions) {
+    const b = bar(a.createdAt, a.waitUntil)
+    const waiting = b.lapsed
+      ? `<span class="left">The agent stopped waiting. If you approve, ask it to check the result.</span>`
+      : `<span class="left">Agent waiting · ${b.left} s</span>`
+    let what, detail, approveLabel, fields = ''
+    if (a.kind === 'command') {
+      what = a.detail.tests ? 'wants to run the tests on its changes' : 'wants to run a command'
+      detail = `<div class="cmd">${esc(a.summary)}</div><div class="small mut" style="margin-top:6px">in ${esc(shortPath(a.detail.cwd))}
+        · <span class="badge ${a.trusted ? 'b-go' : 'b-wait'}">${a.trusted ? 'Trusted workspace' : 'Untrusted workspace'}</span></div>
+        ${renderChanges(a.changes || [])}`
+      approveLabel = 'Run it'
+    } else if (a.kind === 'revert') {
+      what = 'wants to undo changes'
+      detail = `<div class="cmd">${esc(a.summary)}</div>`
+      approveLabel = 'Undo changes'
+    } else {
+      what = `wants ${esc(a.detail.mode)} access to a folder`
+      detail = `<div class="small" style="margin-bottom:8px">“${esc(a.detail.reason)}”</div>`
+      fields = `<div class="fields">
+        <input type="text" id="ap-${a.id}" value="${esc(a.detail.path)}" size="44" aria-label="Folder to share" class="mono">
+        <select id="am-${a.id}" aria-label="Access level"><option value="write"${a.detail.mode === 'write' ? ' selected' : ''}>Read and write</option><option value="read"${a.detail.mode === 'read' ? ' selected' : ''}>Read only</option></select>
+        <select id="ah-${a.id}" aria-label="For how long"><option value="">Until restart</option><option value="1">1 hour</option><option value="4">4 hours</option><option value="8">8 hours</option></select></div>`
+      approveLabel = 'Share folder'
+    }
+    out.push(`<article class="ticket${b.lapsed ? ' lapsed' : ''}" data-deadline="${a.waitUntil}" data-start="${a.createdAt}" data-wait="1">
+      <div class="who">${esc(a.clientName)} · asked at ${clock(new Date(a.createdAt).toISOString())}</div>
+      <div class="what">${esc(a.clientName)} ${what}</div>
+      ${detail}
+      <div class="clock"><div class="track"><div class="fill" style="width:${b.pct}%"></div></div>${waiting}</div>
+      ${fields}
+      <div class="row"><button class="btn go big" data-act="action-approve" data-id="${a.id}" data-kind="${a.kind}">${approveLabel}</button><button class="btn stop" data-act="action-deny" data-id="${a.id}">Refuse</button></div>
+    </article>`)
+  }
+  return out.join('') || `<p class="empty">Nothing needs your decision. When an agent asks to connect, run an unusual command or use another folder, it appears here${audio ? ' and you’ll hear a beep' : ' — turn on alerts to hear a beep'}.</p>`
+}
+
+const CHANGE = { added: 'new', modified: 'changed', deleted: 'deleted' }
+
+/** Files agents changed since your last approval in this workspace: what this command would run. */
+function renderChanges(changes) {
+  if (!changes.length) return '<div class="small mut" style="margin-top:8px">No agent changes since your last approval here.</div>'
+  return `<div class="small" style="margin-top:8px"><b>Changed by agents since your last approval (${changes.length} file${changes.length === 1 ? '' : 's'})</b></div>` +
+    changes.map((c) => `<details class="change"><summary><span class="mono">${esc(shortPath(c.path))}</span>
+      <span class="small mut">${CHANGE[c.status]} · <span class="plus">+${c.added}</span> <span class="minus">−${c.removed}</span></span></summary>
+      <pre class="diff">${c.diff.split('\n').map((l) => `<span class="${l[0] === '+' ? 'plus' : l[0] === '-' ? 'minus' : ''}">${esc(l)}</span>`).join('\n')}</pre></details>`).join('')
+}
+
+function runBadge(st) {
+  const cls = st === 'passed' ? 'b-go' : st === 'running' ? 'b-mut' : st === 'awaiting-approval' ? 'b-wait' : 'b-stop'
+  const label = { passed: 'Passed', failed: 'Failed', running: 'Running', 'awaiting-approval': 'Needs approval', denied: 'Refused', killed: 'Stopped' }[st] || st
+  return `<span class="badge ${cls}">${label}</span>`
+}
+
+const TRIGGER = { agent: 'by the agent', local: 'by you', watch: 'after a file change' }
+
+function renderRuns() {
+  if (!S.runs.length) return '<p class="empty">No runs yet. Runs appear when an agent tests code or runs a command, or when you click Run tests.</p>'
+  const ws = S.activeWorkspace
+  return `<div class="row" style="margin-bottom:6px"><button class="btn" data-act="run-tests" ${ws ? '' : 'disabled'}>Run tests now</button><span class="small mut">${ws ? 'in ' + esc(shortPath(ws)) : 'No active workspace'}</span></div>` +
+    S.runs.map((r, i) => {
+      const action = S.actions.find((a) => a.kind === 'command' && a.detail.runId === r.id)
+      const when = r.startedAt ? ago(r.startedAt) : 'not started'
+      const dur = r.durationMs != null ? ` · ${(r.durationMs / 1000).toFixed(1)} s` : ''
+      return `<details class="run" ${i === 0 && r.status !== 'passed' ? 'open' : ''} data-run="${r.id}">
+        <summary>${runBadge(r.status)}<span class="cmdline">${esc(r.commands.join(' && '))}</span><span class="small mut">${esc(TRIGGER[r.trigger] || r.trigger)} · ${when}${dur}</span></summary>
+        <div class="body">
+          ${action ? `<div class="row" style="margin:4px 0 8px"><button class="btn go" data-act="action-approve" data-id="${action.id}" data-kind="command">Run it</button><button class="btn stop" data-act="action-deny" data-id="${action.id}">Refuse</button></div>` : ''}
+          <div class="small mut">In ${esc(shortPath(r.cwd))}${r.exitCode != null ? ' · exit code ' + r.exitCode : ''}${r.status === 'running' ? ' · <button class="btn" data-act="kill" data-id="' + r.id + '">Stop</button>' : ''}</div>
+          ${r.problems.length ? `<h2>Problems found</h2><pre>${esc(r.problems.join('\n'))}</pre>` : ''}
+          ${r.tail ? `<h2>Last lines of output</h2><pre>${esc(r.tail)}</pre>` : ''}
+        </div></details>`
+    }).join('')
+}
+
+function renderAgents() {
+  if (!S.clients.length) return '<p class="empty">No agent has connected yet. Add this server as a connector in your chat app, and the request will appear in the Inbox.</p>'
+  return S.clients.map((c) => `<div class="panel">
+    <div class="spread"><div><b>${esc(c.name)}</b> <span class="small mut">${esc(c.origin)}</span></div>
+      <span class="badge ${c.connected ? 'b-go' : 'b-mut'}">${c.connected ? 'Connected' : c.approved ? 'Not connected' : 'Never allowed'}</span></div>
+    <div class="small mut" style="margin:4px 0 10px">Last used ${esc(ago(c.lastSeen))}</div>
+    <div class="row"><label for="cp-${c.id}">Access</label>
+      <select id="cp-${c.id}" data-act="profile" data-id="${c.id}"><option value="read-only"${c.profile !== 'full' ? ' selected' : ''}>Read only</option><option value="full"${c.profile === 'full' ? ' selected' : ''}>Full</option></select>
+      <button class="btn stop" data-act="revoke" data-id="${c.id}" data-name="${esc(c.name)}">Disconnect</button></div>
+  </div>`).join('')
+}
+
+function renderFolders() {
+  const list = (arr) => arr.length ? arr.map((p) => `<div class="mono">${esc(p)}</div>`).join('') : '<div class="mut">None</div>'
+  const writeOptions = S.writeRoots.map((p) => `<option value="${esc(p)}"${p === S.activeWorkspace ? ' selected' : ''}>${esc(shortPath(p))}</option>`).join('')
+  return `<div class="panel"><div class="spread"><b>Active workspace</b>
+      ${S.writeRoots.length > 1 ? `<select data-act="workspace" aria-label="Active workspace">${writeOptions}</select>` : ''}</div>
+      <div class="mono" style="margin-top:6px">${esc(S.activeWorkspace || 'None — add one to "workspaces" in config.json')}</div></div>
+    <h2>Agents can edit</h2><p class="small mut" style="margin-top:0">In a <b>trusted</b> folder, tests run on agent changes without asking. In an <b>untrusted</b> one, they wait for you whenever agents changed files you haven’t approved yet, and the card shows those changes.</p>
+    ${S.trust.length ? S.trust.map((t) => `<div class="panel spread"><div><span class="mono">${esc(t.path)}</span>
+        <div class="small mut">${t.unseen ? `${t.unseen} file${t.unseen === 1 ? '' : 's'} changed by agents since your last approval` : 'No unseen agent changes'}</div></div>
+      <div class="row">${t.unseen ? `<button class="btn" data-act="reviewed" data-path="${esc(t.path)}">Mark as seen</button>` : ''}
+        <select data-act="trust" data-path="${esc(t.path)}" aria-label="Trust for ${esc(t.path)}"><option value="1"${t.trusted ? ' selected' : ''}>Trusted</option><option value="0"${t.trusted ? '' : ' selected'}>Untrusted</option></select></div></div>`).join('') : '<div class="panel mut">None</div>'}
+    <div class="panel"><b>Agents can read</b><div style="margin-top:6px">${list(S.readRoots)}</div></div>
+    ${S.grants.length ? `<h2>Shared on request</h2>` + S.grants.map((g) => `<div class="panel spread"><div><span class="badge ${g.mode === 'write' ? 'b-wait' : 'b-mut'}">${g.mode === 'write' ? 'Read and write' : 'Read only'}</span> <span class="mono">${esc(g.path)}</span><div class="small mut">${g.expiresAt ? 'Until ' + new Date(g.expiresAt).toLocaleTimeString() : 'Until the server restarts'}</div></div><button class="btn stop" data-act="grant-revoke" data-id="${g.id}">Stop sharing</button></div>`).join('') : ''}
+    <h2>Undo points</h2><p class="small mut" style="margin-top:0">Saved automatically before every change an agent makes.</p>
+    ${S.checkpoints.length ? S.checkpoints.map((c) => `<div class="panel spread"><div><b>${esc(c.reason)}</b> <span class="small mut">${esc(ago(c.createdAt))}</span><div class="small mono">${c.files.map((f) => esc(shortPath(f.path))).join('<br>')}</div></div><button class="btn" data-act="undo" data-id="${c.id}" data-n="${c.files.length}">Undo this change</button></div>`).join('') : '<p class="mut">No changes yet.</p>'}`
+}
+
+function renderPatch() {
+  return `<div class="panel"><div class="small mut" style="margin-bottom:8px">Applies to <span class="mono">${esc(S.activeWorkspace || 'no active workspace')}</span>, then runs its tests. An undo point is saved first.</div>
+    <textarea id="patch" spellcheck="false" placeholder="*** Begin Patch&#10;*** Update File: calculator.py&#10;@@&#10;-old line&#10;+new line&#10;*** End Patch">${esc(window._patchDraft || '')}</textarea>
+    <div class="row" style="margin-top:10px"><button class="btn primary" data-act="apply">Apply and run tests</button><button class="btn" data-act="apply-only">Apply only</button></div></div>`
+}
+
+function describeAudit(a) {
+  const who = (id) => S.clients.find((c) => c.id === id)?.name || (id === 'local' ? 'You' : 'Agent')
+  switch (a.kind) {
+    case 'tool': return `${who(a.clientId)} used ${a.tool}${a.args && (a.args.command || a.args.path) ? ': ' + (a.args.command || a.args.path) : ''}`
+    case 'tool-error': return `${who(a.clientId)} tried ${a.tool} — ${a.error}`
+    case 'run-start': return `Run started (${(a.commands || []).join(' && ')})`
+    case 'run-end': return `Run ${a.status}${a.durationMs != null ? ' in ' + (a.durationMs / 1000).toFixed(1) + ' s' : ''}`
+    case 'command-pending': return `${who(a.clientId)} asked to run: ${a.command}`
+    case 'local-decision': return `You ${a.approve ? 'approved' : 'refused'}: ${a.summary}`
+    case 'connect-approved': return `You allowed a connection (${a.profile})`
+    case 'connect-denied': return 'You refused a connection'
+    case 'client-registered': return `New chat app registered: ${a.name || 'unnamed'} (${a.origin})`
+    case 'consent-failed': return 'Wrong passphrase or authenticator code entered'
+    case 'consent-credentials-ok': return 'Passphrase and code accepted — waiting for you to allow the connection'
+    case 'connect-start': return `${who(a.clientId)} started signing in`
+    case 'connect-complete': return `${who(a.clientId)} finished signing in`
+    case 'access-request': return `${who(a.clientId)} asked for ${a.mode} access to ${a.path}`
+    case 'local-apply': return `You applied a pasted patch (${(a.applied || []).length} file change(s))`
+    case 'local-revert': return `You undid a change (${(a.restored || []).length} file(s) restored)`
+    case 'profile-change': return `You set ${who(a.clientId)} to ${a.profile}`
+    case 'revoke': return `You disconnected ${who(a.clientId)}`
+    case 'rotate': return 'You disconnected all agents'
+    case 'mode': return `You switched the server ${a.mode}`
+    case 'mcp-error': return `Server error while handling a request: ${a.error}`
+    case 'alert': return a.message
+    default: return a.kind.replace(/-/g, ' ')
+  }
+}
+
+function renderActivity() {
+  if (!S.audit.length) return '<p class="empty">Nothing yet since the server started.</p>'
+  return `<div class="panel" style="padding:4px 8px"><table>${S.audit.map((a) => `<tr><td class="t">${clock(a.time)}</td><td>${esc(describeAudit(a))}</td></tr>`).join('')}</table></div>`
+}
+
+const RENDER = { connect: renderConnect, inbox: renderInbox, runs: renderRuns, agents: renderAgents, folders: renderFolders, patch: renderPatch, activity: renderActivity }
+
+// Redraw only when something actually changed, and never in the middle of a click: replacing a
+// button between mouse-down and mouse-up swallows the click.
+let lastSig = '', pointerDown = false
+document.addEventListener('pointerdown', () => (pointerDown = true), true)
+document.addEventListener('pointerup', () => setTimeout(() => (pointerDown = false), 50), true)
+
+function render(force = false) {
+  if (!S) return
+  const sig = view + JSON.stringify({ ...S, serverTime: 0 })
+  if (!force && (sig === lastSig || pointerDown)) { renderChrome(); return }
+  lastSig = sig
+  // Keep what the user is typing or has expanded.
+  const ta = $('patch'); if (ta) window._patchDraft = ta.value
+  const focused = document.activeElement?.id
+  const open = new Set([...document.querySelectorAll('details.run[open]')].map((d) => d.dataset.run))
+  const busy = document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName) && $('view').contains(document.activeElement)
+  if (busy && view !== 'inbox') { renderChrome(); return }
+  if (busy && view === 'inbox') { renderChrome(); tickClocks(); return }
+  $('view').innerHTML = RENDER[view]()
+  for (const d of document.querySelectorAll('details.run')) if (open.has(d.dataset.run)) d.open = true
+  if (focused && $(focused)) $(focused).focus()
+  renderChrome()
+}
+
+function renderChrome() {
+  renderConn()
+  const n = inboxItems()
+  $('c-inbox').textContent = n
+  $('c-inbox').classList.toggle('hot', n > 0)
+  const running = S.runs.filter((r) => r.status === 'running').length
+  $('c-runs').textContent = running ? running + ' running' : S.runs.length
+  $('c-agents').textContent = S.clients.filter((c) => c.connected).length
+  document.title = n ? `(${n}) Decision needed · harness-mcp` : 'harness-mcp'
+  for (const b of document.querySelectorAll('[data-act=mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === S.mode))
+  const notes = []
+  if (S.mode !== 'on') notes.push(S.mode === 'paused' ? 'Paused: agents stay connected, but every tool call is refused until you choose On.' : 'Off: the server refuses every connection until you choose On.')
+  if (S.locked) notes.push('Sign-in is locked after too many wrong passphrase or code attempts. It unlocks automatically after 15 minutes.')
+  for (const a of S.alerts.slice(0, 3)) notes.push(`${clock(a.time)} — ${a.message}`)
+  $('alerts').innerHTML = notes.map((m) => `<div class="alertbox">${esc(m)}</div>`).join('')
+  if (n > lastInbox && lastInbox >= 0) notify(n)
+  lastInbox = n
+}
+
+function tickClocks() {
+  for (const t of document.querySelectorAll('.ticket[data-deadline]')) {
+    const b = bar(Number(t.dataset.start), Number(t.dataset.deadline))
+    t.querySelector('.fill').style.width = b.pct + '%'
+    t.classList.toggle('lapsed', b.lapsed)
+    t.querySelector('.left').textContent = b.lapsed ? (t.dataset.wait ? 'The agent stopped waiting. If you approve, ask it to check the result.' : 'Expired') : (t.dataset.wait ? `Agent waiting · ${b.left} s` : `${b.left} s left`)
+  }
+  const sec = Math.round((Date.now() - lastOk) / 1000)
+  const down = !lastOk || sec > 6
+  $('live').classList.toggle('down', down)
+  $('live-text').textContent = lastError && down ? lastError : !lastOk ? 'Connecting…' : down ? `Lost the server ${sec} s ago` : `Live · updated ${sec} s ago`
+  // A blocked page has nothing else to show, so put the reason where it can't be missed.
+  if (!S && lastError) $('view').innerHTML = `<div class="alertbox">${esc(lastError)}</div>`
+}
+
+/* ---------- alerts ---------- */
+
+function beep() {
+  if (!audio) return
+  const o = audio.createOscillator(), g = audio.createGain()
+  o.frequency.value = 880; g.gain.value = 0.12
+  o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.22)
+}
+
+function notify(n) {
+  beep()
+  if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+    const first = S.connects[0] ? `${S.connects[0].clientName} wants to connect` : S.actions[0] ? `${S.actions[0].clientName}: ${S.actions[0].summary}` : ''
+    const x = new Notification(`harness-mcp: ${n} decision${n === 1 ? '' : 's'} needed`, { body: first, tag: 'harness-mcp' })
+    x.onclick = () => { window.focus(); location.hash = 'inbox'; x.close() }
+  }
+}
+
+/* ---------- actions ---------- */
+
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-act]')
+  if (!el || el.tagName === 'SELECT') return
+  const id = el.dataset.id
+  switch (el.dataset.act) {
+    case 'copy':
+      try { await navigator.clipboard.writeText(el.dataset.text); toast('Copied. Paste it into your chat app’s connector settings.') }
+      catch { toast('Could not copy automatically. Select the address and press Ctrl+C.', true) }
+      return
+    case 'tunnel': {
+      const op = el.dataset.op
+      if (op === 'restart' && !confirm('Start a new tunnel? The address will change, and every chat app must be given the new one.')) return
+      return post(`/api/tunnel/${op}`, {}, el, { restart: 'Starting a new tunnel. The new address appears in a few seconds.', stop: 'Tunnel stopped', start: 'Starting the tunnel' }[op])
+    }
+    case 'mode': {
+      const m = el.dataset.mode
+      if (m === 'off' && !confirm('Turn the server off? Agents will be refused until you choose On.')) return
+      return post('/api/mode', { mode: m }, el, { on: 'Server is on', paused: 'Paused. Tool calls are refused.', off: 'Server is off' }[m])
+    }
+    case 'rotate':
+      if (!confirm('Disconnect every agent? Each one must sign in again with your passphrase and code.')) return
+      return post('/api/rotate', {}, el, 'All agents disconnected')
+    case 'alerts':
+      try { audio = audio || new AudioContext() } catch {}
+      if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission()
+      beep()
+      el.textContent = 'Alerts on'
+      el.disabled = true
+      try { localStorage.setItem('hm-alerts', '1') } catch {}
+      return toast('Alerts on: you’ll hear a beep, and get a desktop notification when this tab is in the background.')
+    case 'connect-approve':
+    case 'connect-deny': {
+      const allow = el.dataset.act === 'connect-approve'
+      const j = await post(`/api/connect/${id}/${allow ? 'approve' : 'deny'}`, allow ? { profile: $('prof-' + id).value } : {}, el,
+        allow ? 'Connection allowed. The sign-in tab returns to the chat app by itself.' : 'Connection refused. The chat app is told the sign-in failed.')
+      if (j && id === approveId) {
+        // This tab was opened just for this decision: hand control back to the sign-in tab.
+        approveId = null
+        setTimeout(() => {
+          window.close()
+          toast('Done. You can close this tab and return to the sign-in tab.')
+        }, 1500)
+      }
+      return
+    }
+    case 'action-approve': {
+      const kind = el.dataset.kind
+      const body = kind === 'access' ? { path: $('ap-' + id).value, mode: $('am-' + id).value, durationHours: $('ah-' + id).value } : {}
+      const msg = kind === 'command' ? 'Approved. The command is running — see Runs for the result.' : kind === 'revert' ? 'Changes undone' : 'Folder shared'
+      return post(`/api/action/${id}/approve`, body, el, msg)
+    }
+    case 'action-deny':
+      return post(`/api/action/${id}/deny`, {}, el, 'Refused. The agent is told not to retry.')
+    case 'revoke':
+      if (!confirm(`Disconnect ${el.dataset.name}? It must sign in again to reconnect.`)) return
+      return post(`/api/client/${id}/revoke`, {}, el, `${el.dataset.name} disconnected`)
+    case 'grant-revoke':
+      return post(`/api/grant/${id}/revoke`, {}, el, 'Folder no longer shared')
+    case 'undo':
+      if (!confirm(`Undo this change? ${el.dataset.n} file(s) go back to how they were before it.`)) return
+      return post(`/api/checkpoint/${id}/revert`, {}, el, (j) => `Undone: ${j.restored.length} file(s) restored`)
+    case 'run-tests':
+      return post('/api/run-tests', {}, el, 'Tests started')
+    case 'reviewed':
+      return post('/api/reviewed', { path: el.dataset.path }, el, 'Marked as seen')
+    case 'kill':
+      return post(`/api/run/${id}/kill`, {}, el, 'Run stopped')
+    case 'apply':
+    case 'apply-only': {
+      const patch = $('patch').value
+      if (!patch.trim()) return toast('Paste a patch first. It starts with *** Begin Patch.', true)
+      const j = await post('/api/apply', { patch, runTests: el.dataset.act === 'apply' }, el, (j) => `Applied: ${j.applied.length} file change(s)${j.runId ? '. Tests running — see Runs.' : ''}`)
+      if (j) { window._patchDraft = ''; $('patch').value = ''; el.disabled = false }
+      return
+    }
+  }
+})
+
+document.addEventListener('change', (e) => {
+  const el = e.target
+  if (el.dataset.act === 'profile') post(`/api/client/${el.dataset.id}/profile`, { profile: el.value }, el, `Access set to ${el.value === 'full' ? 'full' : 'read only'}`).then(() => (el.disabled = false))
+  if (el.dataset.act === 'trust') post('/api/trust', { path: el.dataset.path, trusted: el.value === '1' }, el, el.value === '1' ? 'Trusted: tests run without asking' : 'Untrusted: tests on unseen agent changes wait for you').then(() => (el.disabled = false))
+  if (el.dataset.act === 'workspace') post('/api/workspace', { path: el.value }, el, 'Active workspace changed').then(() => (el.disabled = false))
+})
+
+// Opened from the sign-in page as #approve=<request id>: show that request and close afterwards.
+let approveId = null
+
+function route() {
+  const v = location.hash.slice(1)
+  if (v.startsWith('approve=')) approveId = decodeURIComponent(v.slice(8))
+  view = VIEWS[v] ? v : 'inbox'
+  for (const a of document.querySelectorAll('nav a')) a.dataset.view === view ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')
+  $('title').textContent = VIEWS[view][0]
+  $('lede').textContent = VIEWS[view][1]
+  render(true)
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' })
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}))
+      throw new Error(j.error || `The server answered ${r.status}.`)
+    }
+    S = await r.json()
+    skew = S.serverTime - Date.now()
+    lastOk = Date.now()
+    lastError = ''
+    render()
+  } catch (e) {
+    lastError = e.message === 'Failed to fetch' ? 'Cannot reach harness-mcp. Is it running?' : e.message
+  }
+  tickClocks()
+}
+
+window.addEventListener('hashchange', route)
+try { if (localStorage.getItem('hm-alerts') === '1') { $('alerts-btn').textContent = 'Turn alerts back on' } } catch {}
+route()
+refresh()
+setInterval(refresh, 2000)
+setInterval(tickClocks, 1000)
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "harness-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local MCP bridge that lets web-interface agents read, build on and test code on this PC.",
+  "type": "module",
+  "engines": {
+    "node": ">=24.22.1"
+  },
+  "scripts": {
+    "setup": "node src/cli.ts setup",
+    "start": "node src/main.ts",
+    "status": "node src/cli.ts status",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@vscode/ripgrep": "^1.18.0",
+    "express": "^5.3.0",
+    "koffi": "^3.3.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}
