@@ -436,8 +436,6 @@ Run these in the `bridge` folder.
 harness_mcp/
 ├── README.md                    ← this file
 ├── DESIGN.md                    ← design, threat model and status
-├── codex-desktop-harness.md     ← analysis of the Codex desktop harness
-├── deepseek-harness.md          ← analysis of the DeepSeek harness
 └── bridge/
     ├── start.cmd                ← start script
     ├── src/
