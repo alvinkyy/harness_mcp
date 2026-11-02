@@ -12,6 +12,7 @@ import { applyPatchText } from './edits.ts'
 import { refuseCompressedBodies } from './encoding.ts'
 import { changesUnder, clearUnder, isTrusted, rootFor } from './review.ts'
 import { createRun, denyRun, getRun, killRun, listRuns, recipeFor, startRun } from './runner.ts'
+import { sandboxStatus } from './sandbox.ts'
 import { canonical, deniedReason, type Scope } from './scope.ts'
 import { lastPublicOrigin } from './origin.ts'
 import type { Store } from './store.ts'
@@ -94,6 +95,7 @@ export function controlApp(config: Config, store: Store, scope: Scope, auth: Har
       })
     res.json({
       serverTime: Date.now(),
+      sandbox: sandboxStatus(),
       connection: {
         publicUrlMode: config.publicUrl === 'auto' ? 'auto' : 'fixed',
         fixedUrl: config.publicUrl === 'auto' ? null : `${config.publicUrl.replace(/\/+$/, '')}/mcp`,
@@ -117,6 +119,13 @@ export function controlApp(config: Config, store: Store, scope: Scope, auth: Har
         }),
       clients,
       grants: store.activeGrants(),
+      refusals: store.activeRefusals().map((a) => ({
+        id: a.id,
+        path: a.detail.path,
+        mode: a.detail.mode,
+        askAgainAt: a.askAgainAt,
+        clientName: store.state.clients[a.clientId]?.client_name ?? a.clientId,
+      })),
       readRoots: scope.readRoots(),
       writeRoots: scope.writeRoots(),
       trust: scope.writeRoots().map((p) => ({ path: p, trusted: isTrusted(p, config, store), unseen: changesUnder(p).length })),
@@ -144,6 +153,7 @@ export function controlApp(config: Config, store: Store, scope: Scope, auth: Har
     if (!action) return res.status(404).json({ error: 'This request was already handled or no longer exists.' })
     const approve = req.params.decision === 'approve'
     action.status = approve ? 'approved' : 'denied'
+    action.decidedAt = Date.now()
     audit('local-decision', { actionId: action.id, actionKind: action.kind, approve, summary: action.summary })
     if (action.kind === 'command') {
       const run = getRun(String(action.detail.runId))
@@ -211,6 +221,31 @@ export function controlApp(config: Config, store: Store, scope: Scope, auth: Har
   app.post('/api/grant/:id/revoke', (req, res) => {
     store.state.grants = store.state.grants.filter((g) => g.id !== req.params.id)
     store.save()
+    res.json({ ok: true })
+  })
+
+  /** Switch a shared folder between read only and read and write, without waiting for the agent to ask. */
+  app.post('/api/grant/:id/mode', (req, res) => {
+    const grant = store.activeGrants().find((g) => g.id === req.params.id)
+    if (!grant) return res.status(404).json({ error: 'That folder is no longer shared.' })
+    const mode = req.body?.mode
+    if (mode !== 'read' && mode !== 'write') return res.status(400).json({ error: 'Choose read or write.' })
+    const denied = deniedReason(grant.path, config)
+    if (denied) return res.status(400).json({ error: denied })
+    grant.mode = mode
+    store.save()
+    audit('grant-mode', { grantId: grant.id, path: grant.path, mode })
+    res.json({ ok: true })
+  })
+
+  /** Let the agent ask about a folder you refused, before the refusal runs out. */
+  app.post('/api/refusal/:id/clear', (req, res) => {
+    const refusal = store.activeRefusals().find((a) => a.id === req.params.id)
+    if (!refusal) return res.status(404).json({ error: 'That refusal has already run out.' })
+    const action = store.state.actions.find((a) => a.id === refusal.id)!
+    action.detail.askAgain = true
+    store.save()
+    audit('refusal-cleared', { actionId: action.id, path: action.detail.path })
     res.json({ ok: true })
   })
 

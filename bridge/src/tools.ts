@@ -19,6 +19,7 @@ import { needsReview, noteBaseline } from './review.ts'
 import { createRun, getRun, killRun, listRuns, noteAgentWrite, recipeFor, startRun, waitForRun, type Run } from './runner.ts'
 import { canonical, deniedReason, Scope, ScopeError, type Access } from './scope.ts'
 import type { Profile, Store } from './store.ts'
+import { sandboxStatus } from './sandbox.ts'
 
 const require = createRequire(import.meta.url)
 const { rgPath } = require('@vscode/ripgrep') as { rgPath: string }
@@ -51,6 +52,10 @@ function text(value: unknown): string {
 
 class ToolFailure extends Error {}
 
+function refusedMessage(folder: string, askAgainAt: number): string {
+  return `The user refused access to ${folder}. Work within the allowed folders (list_roots). You may ask again after ${new Date(askAgainAt).toISOString()}, or sooner if the user allows it on their control page.`
+}
+
 function describeRun(run: Run): Record<string, unknown> {
   return {
     id: run.id,
@@ -62,6 +67,7 @@ function describeRun(run: Run): Record<string, unknown> {
     exitCode: run.exitCode,
     durationMs: run.durationMs,
     sandboxed: run.confined,
+    sandbox: run.sandbox ?? null,
     problems: run.problems,
     tail: run.tail,
     fullLog: run.logChars ? `read_output handle "${run.id}" (${run.logChars} chars)` : null,
@@ -93,7 +99,10 @@ export function buildServer(ctx: ToolContext): McpServer {
         'Work in a fix loop without stopping to ask: after changing code, check it (apply_patch with runTests: true, or run_tests); ' +
         'if tests fail, read the problems, fix the cause and test again. Stop when the tests pass, when the same failure repeats 3 times, ' +
         'or after 6 attempts, then summarise what changed and what still fails. ' +
-        'Prefer test files run by the project test recipe over one-off "python -c"/"node -e" commands (shell quoting breaks them on Windows).',
+        'Prefer test files run by the project test recipe over one-off "python -c"/"node -e" commands (shell quoting breaks them on Windows). ' +
+        'Commands run in a sandbox by default: they can write only inside the workspace (.git is read-only) and network access is blocked ' +
+        '(npm/pip installs, git fetch/push, downloads fail). If a command genuinely needs the network or to write elsewhere, call run with ' +
+        'outsideSandbox: true and a justification; the user must approve that every time.',
     },
   )
 
@@ -154,9 +163,8 @@ export function buildServer(ctx: ToolContext): McpServer {
       const target = e.outside.path
       const folder = existsSync(target) && statSync(target).isDirectory() ? target : dirname(target)
       const same = (a: { detail: Record<string, unknown> }) => String(a.detail.path).toLowerCase() === folder.toLowerCase()
-      if (store.state.actions.some((a) => a.kind === 'access' && a.status === 'denied' && a.clientId === clientId && same(a) && (a.detail.mode === access || access === 'read'))) {
-        throw new ToolFailure(`The user refused ${access} access to ${folder} this session. Work within the allowed folders (list_roots).`)
-      }
+      const refusal = store.refusalFor(clientId, folder)
+      if (refusal) throw new ToolFailure(refusedMessage(folder, refusal.askAgainAt))
       let action = store.state.actions.find((a) => a.kind === 'access' && a.status === 'pending' && a.clientId === clientId && same(a) && (a.detail.mode === access || a.detail.mode === 'write'))
       if (!action) {
         const waiting = store.state.actions.filter((a) => a.kind === 'access' && a.status === 'pending' && a.clientId === clientId)
@@ -441,8 +449,8 @@ export function buildServer(ctx: ToolContext): McpServer {
       if (denied) throw new ToolFailure(`Cannot grant ${p}: ${denied}.`)
       const pending = store.state.actions.filter((a) => a.kind === 'access' && a.status === 'pending' && a.clientId === clientId)
       if (pending.length >= 3) throw new ToolFailure('There are already 3 access requests waiting for the user.')
-      const recentDenied = store.state.actions.some((a) => a.kind === 'access' && a.status === 'denied' && a.clientId === clientId && (a.detail.path as string)?.toLowerCase() === p.toLowerCase())
-      if (recentDenied) throw new ToolFailure(`The user already denied access to ${p} this session.`)
+      const refusal = store.refusalFor(clientId, p)
+      if (refusal) throw new ToolFailure(refusedMessage(p, refusal.askAgainAt))
       const action = store.addAction({ kind: 'access', clientId, summary: `${mode} access to ${p}`, detail: { path: p, mode, reason, durationHours: durationHours ?? null } })
       audit('access-request', { clientId, path: p, mode, reason })
       const decided = await store.waitForAction(action.id, config.limits.toolWaitSec * 1000)
@@ -529,7 +537,7 @@ export function buildServer(ctx: ToolContext): McpServer {
     },
   )
 
-  type RunInit = Pick<Run, 'kind' | 'cwd' | 'commands'>
+  type RunInit = Pick<Run, 'kind' | 'cwd' | 'commands'> & { outsideSandbox?: boolean; justification?: string }
 
   /** Start a run now, or (ask) hold the call open while the user approves it on the control page. */
   async function execute(init: RunInit, ask: boolean): Promise<Record<string, unknown>> {
@@ -537,7 +545,12 @@ export function buildServer(ctx: ToolContext): McpServer {
     if (!ask) void startRun(run, config)
     else {
       const command = init.commands.join(' && ')
-      const action = store.addAction({ kind: 'command', clientId, summary: command, detail: { runId: run.id, cwd: init.cwd, tests: init.kind === 'tests' } })
+      const action = store.addAction({
+        kind: 'command',
+        clientId,
+        summary: command,
+        detail: { runId: run.id, cwd: init.cwd, tests: init.kind === 'tests', outsideSandbox: !!init.outsideSandbox, justification: init.justification ?? null, sandbox: sandboxStatus().mode },
+      })
       audit('command-pending', { clientId, command, cwd: init.cwd, actionId: action.id })
     }
     // The agent gets the result in this same call, including any wait for the user.
@@ -576,14 +589,25 @@ export function buildServer(ctx: ToolContext): McpServer {
     {
       title: 'Run command',
       description:
-        'Run one command (cmd.exe syntax on Windows) in the sandbox with cwd inside a writable workspace. Allowlisted commands (builds, tests, linters, read-only git) run immediately; ' +
-        'anything else waits for the user to approve it on their computer — the call stays open while they decide and returns the result. Prefer run_tests for tests.',
-      input: { command: z.string().min(1).max(4000), cwd: z.string().optional().describe('Working directory; defaults to the active workspace.') },
+        'Run one command (cmd.exe syntax on Windows) with cwd inside a writable workspace. It runs in the sandbox: writes only inside the workspace (.git read-only), ' +
+        'network blocked. Read-only git commands and the workspace test command run immediately; anything else waits for the user to approve it on their computer — ' +
+        'the call stays open while they decide and returns the result. Set outsideSandbox (with a justification) only when the command needs the network or to write ' +
+        "outside the workspace, such as installing packages; that always needs the user's approval. Prefer run_tests for tests.",
+      input: {
+        command: z.string().min(1).max(4000),
+        cwd: z.string().optional().describe('Working directory; defaults to the active workspace.'),
+        outsideSandbox: z.boolean().optional().describe("Run with the user's full rights and network access. Always requires the user's approval."),
+        justification: z.string().max(500).optional().describe('Why the command must run outside the sandbox (shown to the user).'),
+      },
       write: true,
       destructive: true,
     },
-    async ({ command, cwd }) => {
+    async ({ command, cwd, outsideSandbox, justification }) => {
       const dir = cwd ? await allow(cwd, 'write') : await resolveWorkspace(undefined, 'write')
+      if (outsideSandbox) {
+        if (!justification) throw new ToolFailure('Explain why the command must run outside the sandbox (justification).')
+        return execute({ kind: 'command', cwd: dir, commands: [command], outsideSandbox: true, justification }, true)
+      }
       // The workspace's own test command runs code the agent wrote, so it follows the workspace's trust.
       const isRecipe = isAllowlisted(command, [], recipeFor(dir, config)?.commands ?? [])
       const auto = isAllowlisted(command, config.commandAllowlist) || (isRecipe && !testsNeedReview(dir))

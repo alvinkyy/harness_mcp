@@ -26,6 +26,10 @@ export type Run = {
   finishedAt: string | null
   durationMs: number | null
   confined: boolean
+  /** Where it ran: inside the write sandbox, limits-only, or outside the sandbox by the user's approval. */
+  sandbox?: 'workspace-write' | 'limits-only' | 'outside'
+  /** Set when the agent asked to run outside the sandbox (always needs the user's approval). */
+  outsideSandbox?: boolean
   logChars: number
   /** Last ~60 lines, redacted. */
   tail: string
@@ -92,7 +96,7 @@ export function waitForRun(run: Run, ms: number): Promise<Run> {
   })
 }
 
-export function createRun(init: Pick<Run, 'kind' | 'trigger' | 'clientId' | 'cwd' | 'commands'>, awaitingApproval: boolean): Run {
+export function createRun(init: Pick<Run, 'kind' | 'trigger' | 'clientId' | 'cwd' | 'commands'> & { outsideSandbox?: boolean }, awaitingApproval: boolean): Run {
   const run: Run = {
     ...init,
     id: `run_${randomUUID()}`,
@@ -142,7 +146,7 @@ export async function startRun(run: Run, config: Config): Promise<void> {
   live.set(run.id, () => {
     killed = true
   })
-  audit('run-start', { runId: run.id, clientId: run.clientId, trigger: run.trigger, cwd: run.cwd, commands: run.commands })
+  audit('run-start', { runId: run.id, clientId: run.clientId, trigger: run.trigger, cwd: run.cwd, commands: run.commands, outsideSandbox: !!run.outsideSandbox })
   for (const command of run.commands) {
     const header = `$ ${command}\n`
     log += header
@@ -151,8 +155,9 @@ export async function startRun(run: Run, config: Config): Promise<void> {
       memoryMb: config.limits.commandMemoryMb,
       cpuSeconds: config.limits.commandTimeoutSec,
       timeoutSec: config.limits.commandTimeoutSec,
-    })
+    }, { outside: run.outsideSandbox })
     run.confined = proc.confined
+    run.sandbox = proc.mode
     live.set(run.id, () => {
       killed = true
       proc.kill()

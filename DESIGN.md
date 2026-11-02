@@ -108,9 +108,11 @@ agent: reads failures (file:line, last lines) → next patch … until tests pas
 
 - **Requests wait inside the call.** You can **narrow** them on the approval card (pick a subfolder,
   downgrade write to read, or set hours).
-- **Limits:** at most 3 pending requests per client. A refused folder isn't asked about again that
-  session.
-- **Grants** last until restart or the hours chosen, and can be revoked on the Folders page.
+- **Limits:** at most 3 pending requests per client. After a refusal the agent can't ask about that
+  folder again for 10 minutes (`REFUSAL_BLOCK_MS`), unless you click **Allow asking again** under
+  *Refused folders* on the Folders page.
+- **Grants** last until restart or the hours chosen. On the Folders page you can switch a grant
+  between read only and read and write (no new request needed), or stop sharing it.
 - **Paths are canonicalized** before every check, with symlinks and junctions resolved.
 
 ### 5.3 Redaction
@@ -143,14 +145,42 @@ errors.
   seen; so does **Mark as seen**.
 - **No agent edits inside `.git`:** hooks or settings there could make plain `git status` run a
   program.
-- **The control page always shows** a "Limits-only mode" strip.
-- **Limits-only mode (by decision; no write-confining sandbox):** a Job Object (whole-tree kill on
-  timeout, memory and CPU caps) and a scrubbed environment.
-- **What this does not cover:** commands run with your full user rights, so they can write and
-  read anywhere you can, and use the network. A child started in the first milliseconds can escape
-  the Job Object.
-- **What the risk is:** allowlisted test commands run code the agent wrote. Keep the allowlist to
-  commands you'd run yourself, and use harness-mcp only on personal projects.
+- **Command sandbox (default, `sandbox.mode: "workspace-write"`).** It follows Codex's model
+  ("sandboxed by default, writes confined to the workspace, network off"). The design was checked
+  against OpenAI's published write-up and the shipped `codex-command-runner.exe` /
+  `codex-windows-sandbox-*.exe`; no Codex code is used.
+  - **Writes:**
+    - Commands run at **Windows Low integrity** with all privileges removed
+      (`sandbox-launch.ts`).
+    - The workspaces, approved write grants and the sandbox's own temp/cache folders are labelled
+      Low. Each `.git` is labelled Medium, so it stays read-only.
+    - Everything else, including your profile, other projects and the registry, can't be written.
+  - **Process:** created suspended and placed in a Job Object before it runs (memory/CPU caps,
+    whole-tree kill). That closes the old start-up escape gap.
+  - **Network:** blocked the same way as Codex's unelevated mode. Proxies point at a dead port;
+    ssh/scp/sftp are stubbed; npm/pip/go run offline. This is **advisory**: a program that opens
+    sockets itself can still connect.
+  - **Reads:** not restricted, same as Codex.
+  - **Escape hatch:** `run` with `outsideSandbox: true` plus a justification. It always needs your
+    approval, and the card is marked "Outside sandbox".
+  - **Fallback:** if the start-up self-test fails, commands run limits-only and the control page
+    says why.
+  - **Undo:** `npm run sandbox:remove` clears every label harness-mcp applied (recorded in
+    `sandbox.json`).
+- **Why Low integrity instead of Codex's write-restricted token:**
+  - Codex's unelevated design was rebuilt and proven here first.
+  - Under it, Node/libuv child processes with piped stdio fail with `EPERM`. That is Codex's own
+    open bug, openai/codex#47868 / #45697. The cause is that a write-restricted token can't open the
+    named pipes it creates.
+  - Low integrity doesn't have that problem.
+  - **Trade-off** (the one Codex cited): a Low-labelled workspace is also writable by other
+    Low-integrity programs on the PC. Those are rare; browser sandboxes run below Low.
+- **Limits-only** (`sandbox.mode: "off"`, self-test failure, or an approved outside-sandbox
+  command): a Job Object and a scrubbed environment, with full user rights.
+- **The control page** shows a green "Sandbox on" or red "Limits-only" banner, and marks each run
+  and approval card *Sandboxed*, *Limits-only* or *Outside sandbox*.
+- **What the risk still is:** sandboxed commands can read what you can read, and code that ignores
+  proxy settings can reach the network. Keep the allowlist to commands you'd run yourself.
 
 ### 5.5 Request bodies
 - **Compressed bodies are refused** (415) on both servers before any parser runs. Express
@@ -174,7 +204,7 @@ errors.
 stops both. Setup is `npm run setup`: passphrase, authenticator, tunnel mode, first workspace.
 
 ## 7. Tests
-`npm test` runs 67 automated tests:
+`npm test` runs 75 automated tests:
 - Authentication, including the sign-in endings and Back/Reload.
 - Loopback surfaces, scope and redaction.
 - Sandbox and approvals, in-call approvals and the fix loop.
@@ -195,11 +225,11 @@ Group E (real chat apps through the tunnel) is manual and still to do (§8).
 | 1 | Auto access requests · probe removed · `start.cmd` · run history · watch skip · retention · this doc | **Done** |
 | 2 | Personal-data masking | Skipped by decision (no customer data) |
 | 3 | Encrypt `secrets.json` with Windows DPAPI (this user + this PC, app-specific entropy); old plain files migrate at start; unreadable or tampered files fail closed | **Done** |
-| 4 | Write-confining command sandbox | **Dropped by decision.** Commands run in **limits-only** mode. Evaluated: Codex sandbox (dependency on Codex), Docker (heavy memory), WSL + bubblewrap (lightest, confinement proven on this PC, then removed). Protection comes from the allowlist, in-call approvals, Job Object limits, a scrubbed environment and harness-mcp's own path checks on every edit (§5.4). |
+| 4 | Write-confining command sandbox | **Done (2026-11-02), reversing the earlier "dropped" decision.** Codex-style sandbox on by default: Low integrity + workspace labels, suspended start inside a Job Object, advisory network block, `outsideSandbox` escape hatch behind approval (§5.4). Codex's write-restricted-token design was built and tested first, then replaced because of its Node pipe `EPERM` bug. Earlier options rejected: depending on Codex's binaries, Docker (memory), WSL + bubblewrap. All tests pass, including `test/sandbox.test.ts`. |
 | — | Node2Shell: refuse compressed bodies; Node 24.22.2 | **Done** |
 | — | Approval cards with changes since your last approval; trusted/untrusted workspaces | **Done** |
 | 5 | End-to-end check with ChatGPT and Claude (group E, the new sign-in flow, 85 s waits) | Planned |
-| — | Let `python <file>.py` in the workspace run without approval | Not planned: without write confinement, it stays behind approval |
+| — | Let `python <file>.py` in the workspace run without approval | Possible now that writes are confined; still behind approval because reads aren't restricted and the network block is advisory. Your call. |
 | — | Code mode (`exec` in an isolate) | Later |
 | — | Tray app / Windows service | Later |
 

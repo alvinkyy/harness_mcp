@@ -54,9 +54,14 @@ export type PendingAction = {
   clientId: string
   createdAt: number
   status: 'pending' | 'approved' | 'denied'
+  /** When the user approved or refused it on the control page. */
+  decidedAt?: number
   summary: string
   detail: Record<string, unknown>
 }
+
+/** After you refuse a folder, the agent may not ask about it again for this long (or until you allow asking again). */
+export const REFUSAL_BLOCK_MS = 10 * 60_000
 
 export type Grant = {
   id: string
@@ -136,6 +141,20 @@ export class Store {
   activeGrants(): Grant[] {
     const now = Date.now()
     return this.state.grants.filter((g) => g.expiresAt === null || g.expiresAt > now)
+  }
+
+  /** Folder-access refusals that still stop the agent from asking again. */
+  activeRefusals(): (PendingAction & { askAgainAt: number })[] {
+    const now = Date.now()
+    return this.state.actions
+      .filter((a) => a.kind === 'access' && a.status === 'denied' && !a.detail.askAgain)
+      .map((a) => ({ ...a, askAgainAt: (a.decidedAt ?? a.createdAt) + REFUSAL_BLOCK_MS }))
+      .filter((a) => a.askAgainAt > now)
+  }
+
+  /** The refusal that blocks this client from asking about `folder` again, if any. */
+  refusalFor(clientId: string, folder: string): (PendingAction & { askAgainAt: number }) | undefined {
+    return this.activeRefusals().find((a) => a.clientId === clientId && String(a.detail.path).toLowerCase() === folder.toLowerCase())
   }
 
   addAction(action: Omit<PendingAction, 'id' | 'createdAt' | 'status'>): PendingAction {

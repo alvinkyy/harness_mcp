@@ -6,6 +6,7 @@ import { join } from 'node:path'
 // Isolate all state before any module reads HARNESS_HOME.
 export const root = mkdtempSync(join(tmpdir(), 'harness-test-'))
 process.env.HARNESS_HOME = join(root, 'home')
+process.env.HARNESS_SANDBOX_DIR = join(root, 'sandbox')
 export const workspace = join(root, 'ws')
 export const outside = join(root, 'outside')
 mkdirSync(workspace, { recursive: true })

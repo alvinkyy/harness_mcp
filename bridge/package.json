@@ -11,6 +11,7 @@
     "setup": "node src/cli.ts setup",
     "start": "node src/main.ts",
     "status": "node src/cli.ts status",
+    "sandbox:remove": "node src/cli.ts sandbox-remove",
     "typecheck": "tsc --noEmit -p .",
     "test": "node --test test/*.test.ts"
   },

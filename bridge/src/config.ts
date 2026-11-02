@@ -39,6 +39,12 @@ export type Config = {
   commandAllowlist: string[]
   /** Test recipe per workspace path; workspaces without one get an auto-detected recipe. */
   recipes: Record<string, TestRecipe>
+  /**
+   * Command sandbox. "workspace-write" (default): commands can only write in the workspaces (and
+   * approved write grants), `.git` stays read-only, and network tools are blocked (advisory).
+   * "off": limits-only, commands run with your full Windows rights.
+   */
+  sandbox: { mode: 'workspace-write' | 'off' }
   /** How long audit logs, run logs, stored outputs and checkpoints are kept. */
   retention: { days: number; maxCheckpoints: number }
   limits: {
@@ -88,6 +94,7 @@ export function defaultConfig(): Config {
     // the agent can edit package.json, so they would let it run anything without asking.
     commandAllowlist: ['git status', 'git status *', 'git log *', 'git diff *', 'git show *', 'git branch', 'git branch --list *'],
     recipes: {},
+    sandbox: { mode: 'workspace-write' },
     retention: { days: 14, maxCheckpoints: 200 },
     limits: {
       commandTimeoutSec: 600,
@@ -120,6 +127,7 @@ export function loadConfig(): Config {
     auth: { ...base.auth, ...raw.auth },
     tunnel: { ...base.tunnel, ...raw.tunnel },
     retention: { ...base.retention, ...raw.retention },
+    sandbox: { ...base.sandbox, ...raw.sandbox },
   }
 }
 

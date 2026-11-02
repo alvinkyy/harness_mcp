@@ -104,6 +104,7 @@ td.t{white-space:nowrap;color:var(--mut);font-family:var(--mono);font-size:12.5p
 @keyframes pop{from{transform:translateY(6px);opacity:0}}
 .modestrip{border-left:4px solid var(--wait);background:var(--panel);border-radius:0 8px 8px 0;padding:8px 12px;margin:0 0 14px;font-size:13.5px;color:var(--mut)}
 .modestrip b{color:var(--ink)}
+.modestrip.on{border-left-color:var(--go)} .modestrip.off{border-left-color:var(--stop)}
 .conn{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0 0 14px}
 .conn .url{font:14px var(--mono);font-weight:600;word-break:break-all;flex:1 1 260px}
 .conn.changed{border-color:var(--wait);background:var(--wait-bg)}
@@ -152,7 +153,7 @@ main{min-width:0}
     </div>
   </header>
   <div id="conn"></div>
-  <div class="modestrip" role="note"><b>Limits-only mode.</b> Commands run with your full Windows rights: they can read, change and send anything your account can, with time and memory limits only. Read-only git commands and each workspace’s own test command run without asking; every other command waits for you in the Inbox.</div>
+  <div class="modestrip" role="note" id="modestrip"><b>Checking the sandbox…</b></div>
   <div id="alerts"></div>
   <section id="view" aria-live="polite"></section>
 </main>
@@ -298,11 +299,16 @@ function renderInbox() {
       : `<span class="left">Agent waiting · ${b.left} s</span>`
     let what, detail, approveLabel, fields = ''
     if (a.kind === 'command') {
-      what = a.detail.tests ? 'wants to run the tests on its changes' : 'wants to run a command'
-      detail = `<div class="cmd">${esc(a.summary)}</div><div class="small mut" style="margin-top:6px">in ${esc(shortPath(a.detail.cwd))}
+      what = a.detail.outsideSandbox ? 'wants to run a command OUTSIDE the sandbox' : a.detail.tests ? 'wants to run the tests on its changes' : 'wants to run a command'
+      const where = a.detail.outsideSandbox
+        ? `<div class="small" style="margin:6px 0"><span class="badge b-stop">Outside sandbox</span> Runs with your full Windows rights and network access.${a.detail.justification ? ` Agent’s reason: “${esc(a.detail.justification)}”` : ''}</div>`
+        : a.detail.sandbox === 'workspace-write'
+          ? `<div class="small" style="margin:6px 0"><span class="badge b-go">Sandboxed</span> Can only write inside the workspace; network blocked.</div>`
+          : `<div class="small" style="margin:6px 0"><span class="badge b-wait">Limits-only</span> Sandbox is off: runs with your full Windows rights.</div>`
+      detail = `<div class="cmd">${esc(a.summary)}</div>${where}<div class="small mut" style="margin-top:6px">in ${esc(shortPath(a.detail.cwd))}
         · <span class="badge ${a.trusted ? 'b-go' : 'b-wait'}">${a.trusted ? 'Trusted workspace' : 'Untrusted workspace'}</span></div>
         ${renderChanges(a.changes || [])}`
-      approveLabel = 'Run it'
+      approveLabel = a.detail.outsideSandbox ? 'Run outside sandbox' : 'Run it'
     } else if (a.kind === 'revert') {
       what = 'wants to undo changes'
       detail = `<div class="cmd">${esc(a.summary)}</div>`
@@ -359,7 +365,7 @@ function renderRuns() {
         <summary>${runBadge(r.status)}<span class="cmdline">${esc(r.commands.join(' && '))}</span><span class="small mut">${esc(TRIGGER[r.trigger] || r.trigger)} · ${when}${dur}</span></summary>
         <div class="body">
           ${action ? `<div class="row" style="margin:4px 0 8px"><button class="btn go" data-act="action-approve" data-id="${action.id}" data-kind="command">Run it</button><button class="btn stop" data-act="action-deny" data-id="${action.id}">Refuse</button></div>` : ''}
-          <div class="small mut">In ${esc(shortPath(r.cwd))}${r.exitCode != null ? ' · exit code ' + r.exitCode : ''}${r.status === 'running' ? ' · <button class="btn" data-act="kill" data-id="' + r.id + '">Stop</button>' : ''}</div>
+          <div class="small mut">${r.sandbox === 'workspace-write' ? '<span class="badge b-go">Sandboxed</span> ' : r.sandbox === 'outside' ? '<span class="badge b-stop">Outside sandbox</span> ' : r.sandbox === 'limits-only' ? '<span class="badge b-wait">Limits-only</span> ' : ''}In ${esc(shortPath(r.cwd))}${r.exitCode != null ? ' · exit code ' + r.exitCode : ''}${r.status === 'running' ? ' · <button class="btn" data-act="kill" data-id="' + r.id + '">Stop</button>' : ''}</div>
           ${r.problems.length ? `<h2>Problems found</h2><pre>${esc(r.problems.join('\n'))}</pre>` : ''}
           ${r.tail ? `<h2>Last lines of output</h2><pre>${esc(r.tail)}</pre>` : ''}
         </div></details>`
@@ -390,7 +396,10 @@ function renderFolders() {
       <div class="row">${t.unseen ? `<button class="btn" data-act="reviewed" data-path="${esc(t.path)}">Mark as seen</button>` : ''}
         <select data-act="trust" data-path="${esc(t.path)}" aria-label="Trust for ${esc(t.path)}"><option value="1"${t.trusted ? ' selected' : ''}>Trusted</option><option value="0"${t.trusted ? '' : ' selected'}>Untrusted</option></select></div></div>`).join('') : '<div class="panel mut">None</div>'}
     <div class="panel"><b>Agents can read</b><div style="margin-top:6px">${list(S.readRoots)}</div></div>
-    ${S.grants.length ? `<h2>Shared on request</h2>` + S.grants.map((g) => `<div class="panel spread"><div><span class="badge ${g.mode === 'write' ? 'b-wait' : 'b-mut'}">${g.mode === 'write' ? 'Read and write' : 'Read only'}</span> <span class="mono">${esc(g.path)}</span><div class="small mut">${g.expiresAt ? 'Until ' + new Date(g.expiresAt).toLocaleTimeString() : 'Until the server restarts'}</div></div><button class="btn stop" data-act="grant-revoke" data-id="${g.id}">Stop sharing</button></div>`).join('') : ''}
+    ${S.grants.length ? `<h2>Shared on request</h2>` + S.grants.map((g) => `<div class="panel spread"><div><span class="mono">${esc(g.path)}</span><div class="small mut">${g.expiresAt ? 'Until ' + new Date(g.expiresAt).toLocaleTimeString() : 'Until the server restarts'}</div></div>
+      <div class="row"><select data-act="grant-mode" data-id="${g.id}" aria-label="Access to ${esc(g.path)}"><option value="read"${g.mode === 'read' ? ' selected' : ''}>Read only</option><option value="write"${g.mode === 'write' ? ' selected' : ''}>Read and write</option></select>
+        <button class="btn stop" data-act="grant-revoke" data-id="${g.id}">Stop sharing</button></div></div>`).join('') : ''}
+    ${S.refusals.length ? `<h2>Refused folders</h2><p class="small mut">The agent can't ask about these again until the time shown. Allow it to ask sooner if you refused by mistake.</p>` + S.refusals.map((r) => `<div class="panel spread"><div><span class="badge b-stop">Refused ${esc(r.mode)}</span> <span class="mono">${esc(r.path)}</span><div class="small mut">${esc(r.clientName)} · can ask again at ${new Date(r.askAgainAt).toLocaleTimeString()}</div></div><button class="btn" data-act="refusal-clear" data-id="${r.id}">Allow asking again</button></div>`).join('') : ''}
     <h2>Undo points</h2><p class="small mut" style="margin-top:0">Saved automatically before every change an agent makes.</p>
     ${S.checkpoints.length ? S.checkpoints.map((c) => `<div class="panel spread"><div><b>${esc(c.reason)}</b> <span class="small mut">${esc(ago(c.createdAt))}</span><div class="small mono">${c.files.map((f) => esc(shortPath(f.path))).join('<br>')}</div></div><button class="btn" data-act="undo" data-id="${c.id}" data-n="${c.files.length}">Undo this change</button></div>`).join('') : '<p class="mut">No changes yet.</p>'}`
 }
@@ -573,6 +582,8 @@ document.addEventListener('click', async (e) => {
       return post(`/api/client/${id}/revoke`, {}, el, `${el.dataset.name} disconnected`)
     case 'grant-revoke':
       return post(`/api/grant/${id}/revoke`, {}, el, 'Folder no longer shared')
+    case 'refusal-clear':
+      return post(`/api/refusal/${id}/clear`, {}, el, 'The agent may ask about this folder again')
     case 'undo':
       if (!confirm(`Undo this change? ${el.dataset.n} file(s) go back to how they were before it.`)) return
       return post(`/api/checkpoint/${id}/revert`, {}, el, (j) => `Undone: ${j.restored.length} file(s) restored`)
@@ -597,6 +608,7 @@ document.addEventListener('change', (e) => {
   const el = e.target
   if (el.dataset.act === 'profile') post(`/api/client/${el.dataset.id}/profile`, { profile: el.value }, el, `Access set to ${el.value === 'full' ? 'full' : 'read only'}`).then(() => (el.disabled = false))
   if (el.dataset.act === 'trust') post('/api/trust', { path: el.dataset.path, trusted: el.value === '1' }, el, el.value === '1' ? 'Trusted: tests run without asking' : 'Untrusted: tests on unseen agent changes wait for you').then(() => (el.disabled = false))
+  if (el.dataset.act === 'grant-mode') post(`/api/grant/${el.dataset.id}/mode`, { mode: el.value }, el, el.value === 'write' ? 'Agents can now read and write this folder' : 'Agents can now only read this folder').then(() => (el.disabled = false))
   if (el.dataset.act === 'workspace') post('/api/workspace', { path: el.value }, el, 'Active workspace changed').then(() => (el.disabled = false))
 })
 
@@ -613,6 +625,20 @@ function route() {
   render(true)
 }
 
+function renderSandbox() {
+  const sb = S.sandbox
+  const el = $('modestrip')
+  if (!sb || !el) return
+  if (sb.mode === 'workspace-write') {
+    el.className = 'modestrip on'
+    el.innerHTML = `<b>Sandbox on.</b> Commands run at Windows Low integrity and can write only inside your workspaces (${sb.writableRoots.length} folder${sb.writableRoots.length === 1 ? '' : 's'}); <code>.git</code> stays read-only. Network tools are blocked — npm/pip installs, git fetch/push and downloads fail. This network block is advisory: a program that opens connections itself could still get out, and commands can read files your account can read. A command the agent asks to run <b>outside</b> the sandbox always waits for you.` +
+      (sb.errors.length ? `<div class="small" style="color:var(--stop);margin-top:4px">Some folders could not be prepared: ${sb.errors.map(esc).join('; ')}</div>` : '')
+  } else {
+    el.className = 'modestrip off'
+    el.innerHTML = `<b>Limits-only mode.</b> ${esc(sb.detail)} Commands run with your full Windows rights: they can read, change and send anything your account can, with time and memory limits only. Read-only git commands and each workspace’s own test command run without asking; every other command waits for you in the Inbox.`
+  }
+}
+
 async function refresh() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' })
@@ -624,6 +650,7 @@ async function refresh() {
     skew = S.serverTime - Date.now()
     lastOk = Date.now()
     lastError = ''
+    renderSandbox()
     render()
   } catch (e) {
     lastError = e.message === 'Failed to fetch' ? 'Cannot reach harness-mcp. Is it running?' : e.message

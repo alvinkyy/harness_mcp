@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline'
 import { canonical } from './scope.ts'
 import { harnessHome, homePath, loadConfig, saveConfig } from './config.ts'
 import { createSecrets, hasSecrets } from './secrets.ts'
+import { removeSandbox } from './sandbox.ts'
 import { Store } from './store.ts'
 
 function ask(question: string, hidden = false): Promise<string> {
@@ -70,4 +71,9 @@ function status(): void {
 const cmd = process.argv[2]
 if (cmd === 'setup') await setup()
 else if (cmd === 'status') status()
-else console.log('Usage: node src/cli.ts setup | status')
+else if (cmd === 'sandbox-remove') {
+  // Undo the sandbox's folder-permission entries. Stop harness-mcp first, and set sandbox.mode to
+  // "off" in config.json, or the next start adds them again.
+  const done = removeSandbox()
+  console.log(done.length ? `Removed sandbox permissions from:\n  ${done.join('\n  ')}` : 'No sandbox permissions to remove.')
+} else console.log('Usage: node src/cli.ts setup | status | sandbox-remove')

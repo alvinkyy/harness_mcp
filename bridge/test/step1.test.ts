@@ -53,9 +53,50 @@ describe('Automatic access requests', () => {
     const r = await call
     assert.match(r.text, /refused write access/)
     assert.equal(existsSync(join(other, 'new.txt')), false)
-    // A second attempt in the same session is refused at once, without asking again.
+    // A second attempt soon after is refused at once, without asking again, and says when it may ask.
     const again = await h.callTool(t.access_token, 'write_file', { path: join(other, 'new.txt'), content: 'x' })
-    assert.match(again.text, /refused write access/)
+    assert.match(again.text, /refused access to .*write-target.*ask again after/)
+    const asked = await h.callTool(t.access_token, 'request_access', { path: other, mode: 'write', reason: 'second try' })
+    assert.match(asked.text, /ask again after/)
+  })
+
+  test('"Allow asking again" lets the agent ask about a refused folder at once', async () => {
+    const other = join(h.root, 'write-target')
+    const s = (await (await fetch(`${h.CONTROL}/api/state`)).json()) as { refusals: { id: string; path: string }[] }
+    const refusal = s.refusals.find((r) => r.path.endsWith('write-target'))
+    assert.ok(refusal, 'the refusal is listed on the control page')
+    assert.equal((await h.control(`/api/refusal/${refusal.id}/clear`)).status, 200)
+    const call = h.callTool(t.access_token, 'write_file', { path: join(other, 'new.txt'), content: 'second' })
+    const req = await waitForPending((a) => a.kind === 'access' && String(a.detail.path).endsWith('write-target'))
+    await h.control(`/api/action/${req.id}/approve`, { mode: 'write' })
+    const r = await call
+    assert.equal(r.isError, false, r.text)
+    assert.equal(readFileSync(join(other, 'new.txt'), 'utf8'), 'second')
+  })
+
+  test('the user can switch a shared folder between read only and read and write', async () => {
+    const other = join(h.root, 'switch-target')
+    mkdirSync(other, { recursive: true })
+    h.write(join(other, 'a.txt'), 'a')
+    const read = h.callTool(t.access_token, 'read_files', { files: [{ path: join(other, 'a.txt') }] })
+    const req = await waitForPending((a) => a.kind === 'access' && String(a.detail.path).endsWith('switch-target'))
+    await h.control(`/api/action/${req.id}/approve`, { mode: 'read' })
+    await read
+
+    // Upgrade to write from the control page: the agent can now write without another card.
+    assert.equal((await h.control(`/api/grant/${req.id}/mode`, { mode: 'write' })).status, 200)
+    const w = await h.callTool(t.access_token, 'write_file', { path: join(other, 'b.txt'), content: 'b' })
+    assert.equal(w.isError, false, w.text)
+    assert.equal(readFileSync(join(other, 'b.txt'), 'utf8'), 'b')
+
+    // Back to read only: the next write asks again.
+    assert.equal((await h.control(`/api/grant/${req.id}/mode`, { mode: 'read' })).status, 200)
+    const call = h.callTool(t.access_token, 'write_file', { path: join(other, 'c.txt'), content: 'c' })
+    const again = await waitForPending((a) => a.kind === 'access' && String(a.detail.path).endsWith('switch-target') && a.detail.mode === 'write')
+    await h.control(`/api/action/${again.id}/deny`)
+    await call
+    assert.equal(existsSync(join(other, 'c.txt')), false)
+    assert.equal((await h.control(`/api/grant/${req.id}/mode`, { mode: 'admin' })).status, 400)
   })
 
   test('never-shared paths are refused without asking', async () => {

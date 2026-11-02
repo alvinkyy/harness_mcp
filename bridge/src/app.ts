@@ -16,6 +16,7 @@ import { notePublicOrigin, originFor } from './origin.ts'
 import { authRateLimit } from './ratelimit.ts'
 import { needsReview } from './review.ts'
 import { loadRuns, setAutoRunGuard, syncWatchers } from './runner.ts'
+import { initSandbox, syncSandboxAcls } from './sandbox.ts'
 import { cleanup } from './retention.ts'
 import { Scope } from './scope.ts'
 import { Store } from './store.ts'
@@ -137,6 +138,17 @@ export async function start(config: Config, store = new Store()): Promise<Runnin
   const control = await listen(controlApp(config, store, scope, auth, tunnel), config.controlPort)
   tunnel.start()
   setAutoRunGuard((ws) => !needsReview(ws, config, store, scope))
+  // Sandbox: grant the workspaces (and approved write grants) to the sandbox SID, then self-test.
+  const sb = initSandbox(config, scope.writeRoots())
+  console.log(`  Sandbox: ${sb.mode === 'workspace-write' ? 'ON — ' : 'OFF — '}${sb.detail}`)
+  let lastRoots = scope.writeRoots().join('|')
+  store.onChange(() => {
+    const roots = scope.writeRoots()
+    if (roots.join('|') !== lastRoots) {
+      lastRoots = roots.join('|')
+      syncSandboxAcls(roots)
+    }
+  })
   syncWatchers(config, config.workspaces)
   const sweeper = setInterval(() => auth.sweep(), 5_000)
   sweeper.unref()
